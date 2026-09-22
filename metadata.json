@@ -1,0 +1,8 @@
+{
+  "name": "Daywise",
+  "description": "A personal daily planner and tracker for habits, tasks, routines, mood, and reflections.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

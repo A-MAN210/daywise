@@ -49,7 +49,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/AuthContext";
-import { db, doc, onSnapshot, setDoc } from "@/lib/firebase";
+import { db, doc, onSnapshot, setDoc, handleFirestoreError, OperationType } from "@/lib/firebase";
 import type {
   AppState,
   Habit,
@@ -1069,14 +1069,14 @@ export default function Index() {
           const freshState = createInitialState();
           setState(freshState);
           setDoc(docRef, freshState).catch((err) => {
-            console.warn("Notice: Sync pending connection:", err?.message || err);
+            handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}/data/tracker`);
           });
         }
         setIsLoading(false);
         isInitial = false;
       },
       (err) => {
-        console.warn("Firestore snapshot notice:", err?.message || err);
+        handleFirestoreError(err, OperationType.GET, `users/${user.uid}/data/tracker`);
         // Fallback gracefully without blocking user
         setIsLoading(false);
       }
@@ -1095,7 +1095,9 @@ export default function Index() {
         setIsSyncing(true);
         const docRef = doc(db, "users", user.uid, "data", "tracker");
         setDoc(docRef, nextState)
-          .catch((err) => console.warn("Notice: Firestore background sync pending:", err?.message || err))
+          .catch((err) => {
+            handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}/data/tracker`);
+          })
           .finally(() => setIsSyncing(false));
       }
       return nextState;
@@ -1119,7 +1121,7 @@ export default function Index() {
           // ignore
         }
       } catch (err) {
-        console.warn("Notice: Firestore reset pending connection:", err?.message || err);
+        handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}/data/tracker`);
       } finally {
         setIsSyncing(false);
       }

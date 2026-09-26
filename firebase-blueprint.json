@@ -1,0 +1,55 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with personalized settings and display name",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid", "displayName", "email"]
+    },
+    "UserAppState": {
+      "title": "UserAppState",
+      "description": "The complete clean state and tracking data for a user including food, phone usage, vision, and targets",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "habits": { "type": "array" },
+        "tasks": { "type": "array" },
+        "journal": { "type": "array" },
+        "tomorrow": { "type": "array" },
+        "moods": { "type": "array" },
+        "screenLogs": { "type": "array" },
+        "detailedScreenLogs": { "type": "array" },
+        "foodLogs": { "type": "array" },
+        "waterLogs": { "type": "array" },
+        "visionMission": { "type": "object" },
+        "targets": { "type": "array" },
+        "reminders": { "type": "array" },
+        "finance": { "type": "array" },
+        "health": { "type": "array" },
+        "goals": { "type": "array" },
+        "challenge": { "type": "object" },
+        "usualScreenMinutes": { "type": "number" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["habits", "tasks", "journal", "tomorrow", "moods", "screenLogs", "finance", "health", "goals", "challenge", "usualScreenMinutes"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "#/entities/UserProfile",
+      "description": "Stores user profile"
+    },
+    "/users/{userId}/data/tracker": {
+      "schema": "#/entities/UserAppState",
+      "description": "Stores user tracker data isolated by user ID"
+    }
+  }
+}

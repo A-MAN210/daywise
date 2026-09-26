@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -14,6 +14,7 @@ import {
   CircleDollarSign,
   CircleHelp,
   Clock3,
+  Compass,
   Dumbbell,
   Flame,
   Goal,
@@ -23,12 +24,17 @@ import {
   Lightbulb,
   ListChecks,
   LockKeyhole,
+  LogOut,
   Menu,
+  Mic,
   Mic2,
+  Moon,
   MoreHorizontal,
   PencilLine,
   Plus,
+  RefreshCw,
   Rocket,
+  RotateCcw,
   Search,
   Settings2,
   ShieldCheck,
@@ -36,11 +42,34 @@ import {
   Sparkles,
   Target,
   Trophy,
+  UtensilsCrossed,
   WalletCards,
   X,
   Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/context/AuthContext";
+import { db, doc, onSnapshot, setDoc } from "@/lib/firebase";
+import type {
+  AppState,
+  Habit,
+  Task,
+  VersionEntry,
+  MoodEntry,
+  ScreenLog,
+  DetailedScreenLog,
+  FoodLogItem,
+  WaterLog,
+  VisionMissionState,
+  TargetItem,
+  ScheduledReminder,
+} from "@/types/tracker";
+import { FoodTrackerView } from "@/components/tracker/FoodTrackerView";
+import { PhoneUsageView } from "@/components/tracker/PhoneUsageView";
+import { VisionMissionView } from "@/components/tracker/VisionMissionView";
+import { TargetManagementView } from "@/components/tracker/TargetManagementView";
+import { NotificationsRemindersModal } from "@/components/tracker/NotificationsRemindersModal";
+import { VoiceJournalAssistant } from "@/components/tracker/VoiceJournalAssistant";
 
 const TODAY = new Date();
 const STORAGE_KEY = "daywise-app-state";
@@ -49,8 +78,12 @@ type TabKey =
   | "today"
   | "habits"
   | "tasks"
+  | "food"
   | "journal"
   | "tomorrow"
+  | "targets"
+  | "screentime"
+  | "vision"
   | "mood"
   | "money"
   | "health"
@@ -59,31 +92,13 @@ type TabKey =
   | "activity"
   | "achievements"
   | "review";
+
 type NavItem = { key: TabKey; label: string; icon: LucideIcon };
 
-type Habit = { id: string; name: string; color: string; done: string[] };
-type Task = { id: string; title: string; tag: string; time: string; done: boolean };
-type VersionEntry = { id: string; date: string; createdAt: string; text: string };
-type MoodEntry = { score: number; note: string; date: string };
-type ScreenLog = { id: string; date: string; minutes: number; app: string };
 type Challenge = { id: string; name: string; description: string; totalDays: number; completed: number[]; accent: string };
 type FinanceEntry = { id: string; title: string; category: string; amount: number; type: "in" | "out" };
 type HealthLog = { id: string; label: string; value: string; unit: string; date: string };
 type GoalItem = { id: string; title: string; detail: string; progress: number; color: string };
-
-type AppState = {
-  habits: Habit[];
-  tasks: Task[];
-  journal: VersionEntry[];
-  tomorrow: VersionEntry[];
-  moods: MoodEntry[];
-  screenLogs: ScreenLog[];
-  finance: FinanceEntry[];
-  health: HealthLog[];
-  goals: GoalItem[];
-  challenge: Challenge;
-  usualScreenMinutes: number;
-};
 
 const navGroups: Array<{ label: string; items: NavItem[] }> = [
   {
@@ -92,8 +107,17 @@ const navGroups: Array<{ label: string; items: NavItem[] }> = [
       { key: "today", label: "Today", icon: Home },
       { key: "habits", label: "Habits", icon: CheckCircle2 },
       { key: "tasks", label: "Tasks", icon: ListChecks },
+      { key: "food", label: "Food Intake", icon: UtensilsCrossed },
       { key: "journal", label: "Journal", icon: BookOpen },
       { key: "tomorrow", label: "Tomorrow", icon: CalendarDays },
+    ],
+  },
+  {
+    label: "Strategy & Identity",
+    items: [
+      { key: "targets", label: "Goals & Targets", icon: Target },
+      { key: "screentime", label: "Phone Usage", icon: Smartphone },
+      { key: "vision", label: "Vision & Mission", icon: Compass },
     ],
   },
   {
@@ -102,7 +126,7 @@ const navGroups: Array<{ label: string; items: NavItem[] }> = [
       { key: "mood", label: "Mood & mind", icon: Heart },
       { key: "money", label: "Money", icon: WalletCards },
       { key: "health", label: "Health", icon: Dumbbell },
-      { key: "goals", label: "Goals", icon: Goal },
+      { key: "goals", label: "Milestones", icon: Goal },
       { key: "challenges", label: "Challenges", icon: Flame },
     ],
   },
@@ -142,59 +166,31 @@ function createInitialState(): AppState {
   const today = dateKey(TODAY);
   return {
     habits: [
-      { id: "water", name: "Drink 2L of water", color: "mint", done: [today, daysAgo(1), daysAgo(2), daysAgo(3), daysAgo(5), daysAgo(6)] },
-      { id: "move", name: "Move for 30 minutes", color: "coral", done: [today, daysAgo(1), daysAgo(3), daysAgo(4)] },
-      { id: "read", name: "Read before bed", color: "violet", done: [today, daysAgo(1), daysAgo(2), daysAgo(3), daysAgo(4), daysAgo(5)] },
-      { id: "morning", name: "Morning reset", color: "yellow", done: [daysAgo(1), daysAgo(2), daysAgo(3), daysAgo(4), daysAgo(5)] },
+      { id: "water", name: "Drink 2L of water", color: "mint", done: [] },
+      { id: "move", name: "Move for 30 minutes", color: "coral", done: [] },
+      { id: "read", name: "Read before bed", color: "violet", done: [] },
+      { id: "morning", name: "Morning reset", color: "yellow", done: [] },
     ],
-    tasks: [
-      { id: "t1", title: "Send project handoff notes", tag: "Work", time: "09:30", done: true },
-      { id: "t2", title: "Book dentist appointment", tag: "Personal", time: "12:00", done: false },
-      { id: "t3", title: "20 min strength workout", tag: "Health", time: "18:00", done: false },
-      { id: "t4", title: "Outline next week's priorities", tag: "Planning", time: "20:30", done: false },
-    ],
-    journal: [
-      { id: "j1", date: daysAgo(1), createdAt: "Yesterday · 9:42 PM", text: "A quieter day than expected. I protected my morning focus and that made the afternoon feel much lighter." },
-      { id: "j2", date: daysAgo(1), createdAt: "Yesterday · 10:18 PM", text: "Updated reflection: I want to make room for more walks without turning them into another performance metric." },
-      { id: "j3", date: daysAgo(2), createdAt: "Mon · 9:07 PM", text: "Good energy after the workout. I noticed I was less reactive in conversations." },
-    ],
-    tomorrow: [
-      { id: "p1", date: daysAgo(1), createdAt: "Yesterday · 10:31 PM", text: "Finish the product brief before opening Slack. Take a real lunch break." },
-      { id: "p2", date: daysAgo(1), createdAt: "Yesterday · 10:49 PM", text: "Updated plan: keep the afternoon open for deep work, and call Mum after dinner." },
-    ],
-    moods: [
-      { date: today, score: 4, note: "Steady and optimistic" },
-      { date: daysAgo(1), score: 5, note: "Clear-headed" },
-      { date: daysAgo(2), score: 3, note: "A little scattered" },
-      { date: daysAgo(3), score: 4, note: "Good after moving" },
-      { date: daysAgo(4), score: 3, note: "Low energy" },
-      { date: daysAgo(5), score: 4, note: "Focused" },
-      { date: daysAgo(6), score: 5, note: "Rested" },
-    ],
-    screenLogs: [
-      { id: "s1", date: today, minutes: 96, app: "Instagram" },
-      { id: "s2", date: today, minutes: 38, app: "YouTube" },
-      { id: "s3", date: today, minutes: 24, app: "Messages" },
-      { id: "s4", date: daysAgo(1), minutes: 84, app: "Instagram" },
-      { id: "s5", date: daysAgo(1), minutes: 42, app: "Maps" },
-    ],
-    finance: [
-      { id: "f1", title: "Freelance retainer", category: "Income", amount: 3200, type: "in" },
-      { id: "f2", title: "Rent & utilities", category: "Home", amount: 1120, type: "out" },
-      { id: "f3", title: "Weekly groceries", category: "Food", amount: 86, type: "out" },
-      { id: "f4", title: "Coffee with Sam", category: "Social", amount: 18, type: "out" },
-    ],
+    tasks: [],
+    journal: [],
+    tomorrow: [],
+    moods: [],
+    screenLogs: [],
+    detailedScreenLogs: [],
+    foodLogs: [],
+    waterLogs: [],
+    targets: [],
+    reminders: [],
+    finance: [],
     health: [
-      { id: "h1", label: "Sleep", value: "7h 42m", unit: "", date: today },
-      { id: "h2", label: "Movement", value: "34", unit: "min", date: today },
-      { id: "h3", label: "Water", value: "6", unit: "glasses", date: today },
+      { id: "h1", label: "Sleep", value: "—", unit: "hrs", date: today },
+      { id: "h2", label: "Movement", value: "0", unit: "min", date: today },
+      { id: "h3", label: "Water", value: "0", unit: "glasses", date: today },
     ],
     goals: [
-      { id: "g1", title: "Build a calmer workweek", detail: "Protect 3 deep-work blocks each week", progress: 68, color: "#6D5DFB" },
-      { id: "g2", title: "Feel strong in my body", detail: "Move four times a week", progress: 46, color: "#E96E58" },
-      { id: "g3", title: "Create a safety buffer", detail: "Save three months of expenses", progress: 31, color: "#43B987" },
+      { id: "g1", title: "Build a calmer routine", detail: "Start fresh with daily consistency", progress: 0, color: "#6D5DFB" },
     ],
-    challenge: { id: "75-hard", name: "75 Hard", description: "A daily promise to your future self.", totalDays: 75, completed: Array.from({ length: 23 }, (_, index) => index), accent: "#F07A61" },
+    challenge: { id: "challenge-1", name: "30-Day Reset", description: "A fresh daily promise to your future self.", totalDays: 30, completed: [], accent: "#6D5DFB" },
     usualScreenMinutes: 120,
   };
 }
@@ -249,24 +245,127 @@ function ProgressRing({ value, size = 86, stroke = 8 }: { value: number; size?: 
   );
 }
 
-function AppShell({ activeTab, setActiveTab, children, state }: { activeTab: TabKey; setActiveTab: (tab: TabKey) => void; children: ReactNode; state: AppState }) {
+function AppShell({ 
+  activeTab, 
+  setActiveTab, 
+  children, 
+  state,
+  onResetData,
+  onOpenNotifications,
+  isSyncing,
+}: { 
+  activeTab: TabKey; 
+  setActiveTab: (tab: TabKey) => void; 
+  children: ReactNode; 
+  state: AppState;
+  onResetData: () => void;
+  onOpenNotifications: () => void;
+  isSyncing?: boolean;
+}) {
+  const { user, signOut } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const openTasks = state.tasks.filter((task) => !task.done).length;
   const todayMinutes = state.screenLogs.filter((log) => log.date === dateKey(TODAY)).reduce((sum, log) => sum + log.minutes, 0);
+
+  const displayName = "Aman";
+  const userInitials = "AK";
 
   return (
     <div className="min-h-screen bg-[#F8F8FC] text-[#26243A]">
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-[254px] border-r border-[#E9E8F2] bg-white px-4 py-5 lg:flex lg:flex-col">
         <div className="flex items-center gap-3 px-3">
           <LogoMark />
-          <div><div className="font-display text-[21px] font-extrabold tracking-[-0.04em] text-[#26243A]">daywise</div><div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#A09DB7]">your daily OS</div></div>
+          <div><div className="font-display text-[21px] font-extrabold tracking-[-0.04em] text-[#26243A]">DayWise</div><div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#A09DB7]">your daily OS</div></div>
         </div>
-        <div className="mt-8 flex items-center gap-3 rounded-2xl bg-[#F6F4FF] p-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#292741] text-sm font-bold text-white">AS</div>
-          <div className="min-w-0"><div className="truncate text-sm font-bold">Alex Stone</div><div className="text-xs text-[#9491A8]">6 day momentum</div></div>
-          <button className="ml-auto text-[#A09DB7]" aria-label="Open profile"><MoreHorizontal className="h-4 w-4" /></button>
+        
+        {/* User Profile Card */}
+        <div className="relative mt-7">
+          <div 
+            onClick={() => setProfileOpen((prev) => !prev)}
+            className="flex items-center gap-3 rounded-2xl bg-[#F6F4FF] p-3 cursor-pointer hover:bg-[#EFEAFF] transition"
+          >
+            {user?.photoURL ? (
+              <img 
+                src={user.photoURL} 
+                alt={displayName} 
+                className="h-10 w-10 rounded-full object-cover border border-[#D9D3F8]" 
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#6D5DFB] text-sm font-extrabold text-white">
+                {userInitials}
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-extrabold text-[#26243A]">{displayName}</div>
+              <div className="flex items-center gap-1.5 text-xs text-[#9491A8]">
+                {isSyncing ? (
+                  <span className="flex items-center gap-1 text-[#6D5DFB]">
+                    <RefreshCw className="h-3 w-3 animate-spin" /> Syncing...
+                  </span>
+                ) : (
+                  <span>Clean Slate · Active</span>
+                )}
+              </div>
+            </div>
+            <button className="text-[#A09DB7]" aria-label="Open profile menu">
+              <MoreHorizontal className="h-4 w-4" />
+            </button>
+          </div>
+
+          {profileOpen && (
+            <div className="absolute top-full left-0 mt-2 w-full rounded-2xl border border-[#E9E8F2] bg-white p-2 shadow-xl z-50">
+              <div className="px-3 py-2 border-b border-[#F0EEF6]">
+                <div className="text-xs font-bold text-[#26243A] truncate">{user?.email || "amankumawat780@gmail.com"}</div>
+                <div className="text-[10px] font-semibold text-[#8E8B9E]">Logged in as Aman</div>
+              </div>
+              <button
+                onClick={() => {
+                  setProfileOpen(false);
+                  onOpenNotifications();
+                }}
+                className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold text-[#6D5DFB] hover:bg-[#F6F4FF] transition"
+              >
+                <Bell className="h-4 w-4" /> Reminders & Alerts
+              </button>
+              <button
+                onClick={() => {
+                  setProfileOpen(false);
+                  onResetData();
+                }}
+                className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold text-[#E96E58] hover:bg-[#FFF0EC] transition"
+              >
+                <RotateCcw className="h-4 w-4" /> Reset Progress Data
+              </button>
+              <button
+                onClick={() => {
+                  setProfileOpen(false);
+                  signOut();
+                }}
+                className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold text-[#77748F] hover:bg-[#F6F4FF] transition"
+              >
+                <LogOut className="h-4 w-4" /> Sign Out
+              </button>
+            </div>
+          )}
         </div>
-        <nav className="mt-7 flex-1 space-y-6 overflow-y-auto pr-1">
+
+        {/* Notifications & Reminders Quick Button in Sidebar */}
+        <button
+          onClick={onOpenNotifications}
+          className="mt-3 flex items-center justify-between rounded-xl border border-[#E9E8F2] bg-[#FAF9FD] px-3 py-2 text-left hover:border-[#6D5DFB] hover:bg-[#F1EFFF] transition"
+        >
+          <div className="flex items-center gap-2">
+            <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-[#FFF5D9] text-[#CA921A]">
+              <Bell className="h-3.5 w-3.5" />
+            </span>
+            <span className="text-xs font-bold text-[#26243A]">Task Reminders</span>
+          </div>
+          <span className="rounded-full bg-[#6D5DFB] px-1.5 py-0.5 text-[9px] font-extrabold text-white">Alerts</span>
+        </button>
+
+        <nav className="mt-5 flex-1 space-y-5 overflow-y-auto pr-1">
           {navGroups.map((group) => (
             <div key={group.label}>
               <div className="mb-2 px-3 text-[10px] font-extrabold uppercase tracking-[0.18em] text-[#B0AEC0]">{group.label}</div>
@@ -281,22 +380,87 @@ function AppShell({ activeTab, setActiveTab, children, state }: { activeTab: Tab
           ))}
         </nav>
         <div className="rounded-2xl border border-[#E9E8F2] bg-[#FCFCFF] p-3">
-          <div className="flex items-start gap-2"><Bell className="mt-0.5 h-4 w-4 text-[#F09A3E]" /><div><div className="text-xs font-extrabold">Screen time check</div><div className="mt-1 text-[11px] leading-4 text-[#9693A9]">{todayMinutes} min today · usual {state.usualScreenMinutes} min</div></div></div>
-          <button onClick={() => setActiveTab("activity")} className="mt-3 flex items-center gap-1 text-[11px] font-extrabold text-[#6D5DFB]">Review activity <ArrowUpRight className="h-3 w-3" /></button>
+          <div className="flex items-start gap-2"><Smartphone className="mt-0.5 h-4 w-4 text-[#6D5DFB]" /><div><div className="text-xs font-extrabold">Phone usage check</div><div className="mt-1 text-[11px] leading-4 text-[#9693A9]">{todayMinutes} min today · usual {state.usualScreenMinutes} min</div></div></div>
+          <button onClick={() => setActiveTab("screentime")} className="mt-3 flex items-center gap-1 text-[11px] font-extrabold text-[#6D5DFB]">Detailed app monitor <ArrowUpRight className="h-3 w-3" /></button>
         </div>
-        <div className="mt-4 flex items-center justify-between px-3 text-[#AAA7BD]"><button aria-label="Help"><CircleHelp className="h-4 w-4" /></button><button aria-label="Settings"><Settings2 className="h-4 w-4" /></button><span className="text-[10px] font-bold">v1.0 local</span></div>
+        <div className="mt-3 flex items-center justify-between px-3 text-[#AAA7BD]">
+          <button 
+            onClick={onResetData} 
+            title="Reset progress data for Aman" 
+            className="flex items-center gap-1 text-[11px] font-bold text-[#E96E58] hover:underline cursor-pointer"
+          >
+            <RotateCcw className="h-3.5 w-3.5" /> Reset Data
+          </button>
+          <button 
+            onClick={() => signOut()} 
+            title="Sign out of account" 
+            className="flex items-center gap-1 text-[11px] font-bold text-[#8E8B9E] hover:text-[#26243A] cursor-pointer"
+          >
+            <LogOut className="h-3.5 w-3.5" /> Sign Out
+          </button>
+        </div>
       </aside>
 
       <div className="lg:pl-[254px]">
         <header className="sticky top-0 z-20 border-b border-[#E9E8F2]/90 bg-[#F8F8FC]/95 backdrop-blur lg:hidden">
-          <div className="flex items-center justify-between px-4 py-3"><div className="flex items-center gap-2.5"><LogoMark /><span className="font-display text-xl font-extrabold tracking-[-0.04em]">daywise</span></div><button onClick={() => setMobileOpen((open) => !open)} className="rounded-xl border border-[#E9E8F2] bg-white p-2"><Menu className="h-5 w-5" /></button></div>
-          {mobileOpen ? <div className="border-t border-[#E9E8F2] bg-white px-4 py-3"><div className="grid grid-cols-2 gap-2">{navGroups.flatMap((group) => group.items).map((item) => { const Icon = item.icon; return <button key={item.key} onClick={() => { setActiveTab(item.key); setMobileOpen(false); }} className={classNames("flex items-center gap-2 rounded-xl px-3 py-2.5 text-left text-xs font-bold", activeTab === item.key ? "bg-[#6D5DFB] text-white" : "bg-[#F7F6FC] text-[#6D6A82]")}><Icon className="h-4 w-4" />{item.label}</button>; })}</div></div> : null}
+          <div className="flex items-center justify-between px-4 py-3">
+            <div className="flex items-center gap-2.5">
+              <LogoMark />
+              <span className="font-display text-xl font-extrabold tracking-[-0.04em]">DayWise</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={onOpenNotifications}
+                title="Notifications & Reminders"
+                className="rounded-xl border border-[#E9E8F2] bg-white p-2 text-[#CA921A]"
+              >
+                <Bell className="h-4 w-4" />
+              </button>
+              <button 
+                onClick={onResetData}
+                title="Reset Data"
+                className="rounded-xl border border-[#E9E8F2] bg-white p-2 text-[#E96E58]"
+              >
+                <RotateCcw className="h-4 w-4" />
+              </button>
+              <button onClick={() => setMobileOpen((open) => !open)} className="rounded-xl border border-[#E9E8F2] bg-white p-2">
+                <Menu className="h-5 w-5" />
+              </button>
+            </div>
+          </div>
+          {mobileOpen ? (
+            <div className="border-t border-[#E9E8F2] bg-white px-4 py-3">
+              <div className="mb-3 flex items-center justify-between border-b border-[#F0EEF6] pb-2">
+                <div className="text-xs font-bold text-[#26243A]">Logged in as Aman</div>
+                <button 
+                  onClick={() => signOut()} 
+                  className="text-xs font-bold text-[#E96E58]"
+                >
+                  Sign Out
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {navGroups.flatMap((group) => group.items).map((item) => { 
+                  const Icon = item.icon; 
+                  return (
+                    <button 
+                      key={item.key} 
+                      onClick={() => { setActiveTab(item.key); setMobileOpen(false); }} 
+                      className={classNames("flex items-center gap-2 rounded-xl px-3 py-2.5 text-left text-xs font-bold", activeTab === item.key ? "bg-[#6D5DFB] text-white" : "bg-[#F7F6FC] text-[#6D6A82]")}
+                    >
+                      <Icon className="h-4 w-4" />{item.label}
+                    </button>
+                  ); 
+                })}
+              </div>
+            </div>
+          ) : null}
         </header>
         <main className="mx-auto max-w-[1420px] px-4 pb-24 pt-5 sm:px-6 lg:px-10 lg:pb-10 lg:pt-8">{children}</main>
       </div>
 
       <nav className="fixed bottom-0 left-0 right-0 z-30 flex justify-around border-t border-[#E9E8F2] bg-white/95 px-2 py-2 backdrop-blur lg:hidden">
-        {[{ key: "today", label: "Today", icon: Home }, { key: "tasks", label: "Tasks", icon: ListChecks }, { key: "journal", label: "Journal", icon: BookOpen }, { key: "activity", label: "Activity", icon: Activity }, { key: "review", label: "Review", icon: Sparkles }].map((item) => { const Icon = item.icon; return <button key={item.key} onClick={() => setActiveTab(item.key as TabKey)} className={classNames("flex min-w-[54px] flex-col items-center gap-1 rounded-xl px-2 py-1 text-[10px] font-bold", activeTab === item.key ? "text-[#6D5DFB]" : "text-[#AAA7BD]")}><Icon className="h-[18px] w-[18px]" />{item.label}</button>; })}
+        {[{ key: "today", label: "Today", icon: Home }, { key: "tasks", label: "Tasks", icon: ListChecks }, { key: "journal", label: "Journal", icon: BookOpen }, { key: "activity", label: "Activity", icon: Activity }, { key: "review", label: "Review", icon: Sparkles }].map((item) => { const Icon = item.icon; return <button key={item.key} onClick={() => setActiveTab(item.key as TabKey)} className={classNames("flex min-w-[54px] flex-col items-center gap-1 rounded-xl px-2 py-1 text-[10px] font-bold", activeTab === item.key ? "text-[#6D5DFB]" : "text-[#AAA7BD]")}><Icon className={classNames("h-[18px] w-[18px]", activeTab === item.key ? "text-[#6D5DFB]" : "text-[#AAA7BD]")} />{item.label}</button>; })}
       </nav>
     </div>
   );
@@ -318,16 +482,95 @@ function TodayView({ state, updateState, setActiveTab }: { state: AppState; upda
   const mood = state.moods.find((entry) => entry.date === today);
   const screenMinutes = state.screenLogs.filter((log) => log.date === today).reduce((sum, log) => sum + log.minutes, 0);
   const completion = Math.round(((completedHabits + completedTasks) / Math.max(state.habits.length + state.tasks.length, 1)) * 100);
+  
+  // New features data for Today
+  const todayFoodLogs = (state.foodLogs || []).filter((f) => f.date === today);
+  const todayWater = (state.waterLogs || []).find((w) => w.date === today)?.glasses || 0;
+  const dailyTargets = (state.targets || []).filter((t) => t.scope === "daily" && (t.assignedDate === today || !t.assignedDate));
+  const completedDailyTargets = dailyTargets.filter((t) => t.completed).length;
+
   const toggleTask = (id: string) => updateState((current) => ({ ...current, tasks: current.tasks.map((task) => task.id === id ? { ...task, done: !task.done } : task) }));
   const toggleHabit = (id: string) => updateState((current) => ({ ...current, habits: current.habits.map((habit) => habit.id === id ? { ...habit, done: habit.done.includes(today) ? habit.done.filter((day) => day !== today) : [...habit.done, today] } : habit) }));
 
   return <>
-    <PageHeader eyebrow={prettyDate(TODAY)} title="Good morning, Alex" description="A clear view of what matters today. Keep the bar small, keep the promise." action={<Button onClick={() => setActiveTab("journal")} className="h-11 rounded-xl bg-[#6D5DFB] px-4 text-xs font-extrabold shadow-[0_8px_18px_rgba(109,93,251,0.2)] hover:bg-[#5949E8]"><Plus className="mr-2 h-4 w-4" />Log an entry</Button>} />
-    {screenMinutes > state.usualScreenMinutes ? <div className="mb-6 flex items-center gap-3 rounded-2xl border border-[#FFD9B5] bg-[#FFF7ED] px-4 py-3 text-sm text-[#9B5D20]"><span className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#FFE9CE]"><Smartphone className="h-4 w-4" /></span><span><b>Gentle nudge:</b> you've been on your phone for {screenMinutes} minutes today — above your usual {state.usualScreenMinutes}. Maybe leave social apps for tomorrow?</span><button onClick={() => setActiveTab("activity")} className="ml-auto hidden shrink-0 text-xs font-extrabold text-[#D27B21] sm:block">See details</button></div> : null}
+    <PageHeader eyebrow={prettyDate(TODAY)} title="Good morning, Aman" description="A clear view of what matters today. Keep the bar small, keep the promise." action={<Button onClick={() => setActiveTab("journal")} className="h-11 rounded-xl bg-[#6D5DFB] px-4 text-xs font-extrabold shadow-[0_8px_18px_rgba(109,93,251,0.2)] hover:bg-[#5949E8]"><Plus className="mr-2 h-4 w-4" />Log an entry</Button>} />
+    {screenMinutes > state.usualScreenMinutes ? <div className="mb-6 flex items-center gap-3 rounded-2xl border border-[#FFD9B5] bg-[#FFF7ED] px-4 py-3 text-sm text-[#9B5D20]"><span className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#FFE9CE]"><Smartphone className="h-4 w-4" /></span><span><b>Gentle nudge:</b> you've been on your phone for {screenMinutes} minutes today — above your usual {state.usualScreenMinutes}. Maybe leave social apps for tomorrow?</span><button onClick={() => setActiveTab("screentime")} className="ml-auto hidden shrink-0 text-xs font-extrabold text-[#D27B21] sm:block">See details</button></div> : null}
 
-    <section className="mb-6 overflow-hidden rounded-[26px] border border-[#E9E4FF] bg-[#F1EFFF] p-5 sm:p-7"><div className="flex flex-col gap-7 lg:flex-row lg:items-center lg:justify-between"><div className="max-w-[560px]"><div className="mb-3 inline-flex items-center gap-2 rounded-full bg-white/75 px-3 py-1 text-[10px] font-extrabold uppercase tracking-[0.14em] text-[#6D5DFB]"><Sparkles className="h-3.5 w-3.5" /> Your rhythm is building</div><h2 className="font-display text-[27px] font-extrabold leading-tight tracking-[-0.045em] text-[#302C5A] sm:text-[34px]">Small steps are adding up.<br /><span className="text-[#6D5DFB]">Keep your next one easy.</span></h2><p className="mt-3 max-w-[480px] text-sm leading-6 text-[#77729B]">You've shown up {completedHabits + completedTasks} times today. The goal isn't a perfect day — it's a day you can trust.</p><div className="mt-5 flex flex-wrap gap-3"><button onClick={() => setActiveTab("habits")} className="rounded-xl bg-[#6D5DFB] px-4 py-2.5 text-xs font-extrabold text-white shadow-[0_8px_16px_rgba(109,93,251,0.2)]">Continue routine</button><button onClick={() => setActiveTab("review")} className="rounded-xl bg-white px-4 py-2.5 text-xs font-extrabold text-[#6D5DFB]">Ask my review <ArrowUpRight className="ml-1 inline h-3.5 w-3.5" /></button></div></div><div className="flex items-center gap-8 rounded-2xl bg-white/65 p-5 sm:p-6"><ProgressRing value={Math.min(completion, 100)} size={106} stroke={9} /><div><div className="text-xs font-extrabold uppercase tracking-[0.15em] text-[#A19BBE]">Today score</div><div className="mt-2 text-2xl font-extrabold tracking-[-0.05em] text-[#302C5A]">{completedTasks}/{state.tasks.length} tasks</div><div className="mt-1 text-xs font-semibold text-[#9992B2]">{completedHabits}/{state.habits.length} habits done</div><div className="mt-4 flex gap-1.5">{["M", "T", "W", "T", "F", "S", "S"].map((day, index) => <span key={`${day}-${index}`} className={classNames("flex h-6 w-6 items-center justify-center rounded-lg text-[9px] font-extrabold", index < 5 ? "bg-[#6D5DFB] text-white" : "bg-white text-[#A29EBA]")}>{day}</span>)}</div></div></div></div></section>
+    <section className="mb-6 overflow-hidden rounded-[26px] border border-[#E9E4FF] bg-[#F1EFFF] p-5 sm:p-7"><div className="flex flex-col gap-7 lg:flex-row lg:items-center lg:justify-between"><div className="max-w-[560px]"><div className="mb-3 inline-flex items-center gap-2 rounded-full bg-white/75 px-3 py-1 text-[10px] font-extrabold uppercase tracking-[0.14em] text-[#6D5DFB]"><Sparkles className="h-3.5 w-3.5" /> Your rhythm is building</div><h2 className="font-display text-[27px] font-extrabold leading-tight tracking-[-0.04em] text-[#302C5A] sm:text-[34px]">Small steps are adding up.<br /><span className="text-[#6D5DFB]">Keep your next one easy.</span></h2><p className="mt-3 max-w-[480px] text-sm leading-6 text-[#77729B]">You've shown up {completedHabits + completedTasks} times today. The goal isn't a perfect day — it's a day you can trust.</p><div className="mt-5 flex flex-wrap gap-3"><button onClick={() => setActiveTab("habits")} className="rounded-xl bg-[#6D5DFB] px-4 py-2.5 text-xs font-extrabold text-white shadow-[0_8px_16px_rgba(109,93,251,0.2)]">Continue routine</button><button onClick={() => setActiveTab("targets")} className="rounded-xl bg-white px-4 py-2.5 text-xs font-extrabold text-[#6D5DFB]">View targets <ArrowUpRight className="ml-1 inline h-3.5 w-3.5" /></button></div></div><div className="flex items-center gap-8 rounded-2xl bg-white/65 p-5 sm:p-6"><ProgressRing value={Math.min(completion, 100)} size={106} stroke={9} /><div><div className="text-xs font-extrabold uppercase tracking-[0.15em] text-[#A19BBE]">Today score</div><div className="mt-2 text-2xl font-extrabold tracking-[-0.05em] text-[#302C5A]">{completedTasks}/{state.tasks.length} tasks</div><div className="mt-1 text-xs font-semibold text-[#9992B2]">{completedHabits}/{state.habits.length} habits done</div><div className="mt-4 flex gap-1.5">{["M", "T", "W", "T", "F", "S", "S"].map((day, index) => <span key={`${day}-${index}`} className={classNames("flex h-6 w-6 items-center justify-center rounded-lg text-[9px] font-extrabold", index < 5 ? "bg-[#6D5DFB] text-white" : "bg-white text-[#A29EBA]")}>{day}</span>)}</div></div></div></div></section>
 
-    <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><MetricCard label="Open tasks" value={`${openTasks}`} helper="2 due today" icon={ListChecks} tone="bg-[#FFF0EC] text-[#E96E58]" /><MetricCard label="Habit streak" value="6 days" helper="Best this month" icon={Flame} tone="bg-[#FFF5D9] text-[#CA921A]" /><MetricCard label="Mood today" value={mood ? `${mood.score}/5` : "—"} helper={mood?.note || "Tap to check in"} icon={Heart} tone="bg-[#EAF3FF] text-[#4B83D8]" /><MetricCard label="Phone today" value={`${screenMinutes}m`} helper={`${Math.max(state.usualScreenMinutes - screenMinutes, 0)}m under usual`} icon={Smartphone} tone="bg-[#E8F8F0] text-[#2F9B72]" /></div>
+    <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><MetricCard label="Open tasks" value={`${openTasks}`} helper="2 due today" icon={ListChecks} tone="bg-[#FFF0EC] text-[#E96E58]" /><MetricCard label="Habit streak" value="6 days" helper="Best this month" icon={Flame} tone="bg-[#FFF5D9] text-[#CA921A]" /><MetricCard label="Daily targets" value={`${completedDailyTargets}/${dailyTargets.length || 3}`} helper="Planned for today" icon={Target} tone="bg-[#F1EFFF] text-[#6D5DFB]" /><MetricCard label="Phone today" value={`${screenMinutes}m`} helper={`${Math.max(state.usualScreenMinutes - screenMinutes, 0)}m under usual`} icon={Smartphone} tone="bg-[#E8F8F0] text-[#2F9B72]" /></div>
+
+    {/* Integrated New Features Spotlight Bar on Today View */}
+    <div className="mb-6 grid gap-4 sm:grid-cols-3">
+      {/* Food Tracker Quick Card */}
+      <div 
+        onClick={() => setActiveTab("food")}
+        className="rounded-2xl border border-[#E9E8F2] bg-white p-5 cursor-pointer hover:border-[#6D5DFB] hover:shadow-xs transition"
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#FDF2E9] text-[#E67E22]">
+              <UtensilsCrossed className="h-4 w-4" />
+            </span>
+            <div>
+              <div className="text-xs font-extrabold text-[#26243A]">Daily Food Intake</div>
+              <div className="text-[10px] text-[#8E8B9E]">{todayFoodLogs.length} meals logged today</div>
+            </div>
+          </div>
+          <ArrowUpRight className="h-4 w-4 text-[#A09DB7]" />
+        </div>
+        <div className="mt-3 flex items-center justify-between text-xs font-bold text-[#6D6A82]">
+          <span>Hydration: {todayWater}/8 glasses</span>
+          <span className="text-[#6D5DFB]">Manage meals →</span>
+        </div>
+      </div>
+
+      {/* Detailed Phone Usage Quick Card */}
+      <div 
+        onClick={() => setActiveTab("screentime")}
+        className="rounded-2xl border border-[#E9E8F2] bg-white p-5 cursor-pointer hover:border-[#6D5DFB] hover:shadow-xs transition"
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#F6F4FF] text-[#6D5DFB]">
+              <Smartphone className="h-4 w-4" />
+            </span>
+            <div>
+              <div className="text-xs font-extrabold text-[#26243A]">Phone Usage Monitor</div>
+              <div className="text-[10px] text-[#8E8B9E]">{Math.floor(screenMinutes / 60)}h {screenMinutes % 60}m logged</div>
+            </div>
+          </div>
+          <ArrowUpRight className="h-4 w-4 text-[#A09DB7]" />
+        </div>
+        <div className="mt-3 flex items-center justify-between text-xs font-bold text-[#6D6A82]">
+          <span>Budget: {Math.floor(state.usualScreenMinutes / 60)}h {state.usualScreenMinutes % 60}m</span>
+          <span className="text-[#6D5DFB]">App analytics →</span>
+        </div>
+      </div>
+
+      {/* Target & Evening Planning Quick Card */}
+      <div 
+        onClick={() => setActiveTab("targets")}
+        className="rounded-2xl border border-[#E9E8F2] bg-white p-5 cursor-pointer hover:border-[#6D5DFB] hover:shadow-xs transition"
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#292741] text-[#F4BC56]">
+              <Moon className="h-4 w-4" />
+            </span>
+            <div>
+              <div className="text-xs font-extrabold text-[#26243A]">Goals & Tomorrow Plan</div>
+              <div className="text-[10px] text-[#8E8B9E]">Target management</div>
+            </div>
+          </div>
+          <ArrowUpRight className="h-4 w-4 text-[#A09DB7]" />
+        </div>
+        <div className="mt-3 flex items-center justify-between text-xs font-bold text-[#6D6A82]">
+          <span>Pre-sleep handoff</span>
+          <span className="text-[#6D5DFB]">Open targets →</span>
+        </div>
+      </div>
+    </div>
 
     <div className="grid gap-5 xl:grid-cols-[1.3fr_0.7fr]">
       <div className="rounded-2xl border border-[#E9E8F2] bg-white p-5 sm:p-6"><div className="mb-4 flex items-center justify-between"><div><div className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-[#A09DB7]">Your focus</div><h3 className="mt-1 text-lg font-extrabold tracking-[-0.03em]">Today's tasks</h3></div><button onClick={() => setActiveTab("tasks")} className="text-xs font-extrabold text-[#6D5DFB]">View all <ChevronRight className="inline h-3.5 w-3.5" /></button></div><div className="space-y-2">{state.tasks.map((task) => <button key={task.id} onClick={() => toggleTask(task.id)} className="flex w-full items-center gap-3 rounded-xl px-2 py-3 text-left transition hover:bg-[#FAF9FF]"><span className={classNames("flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2", task.done ? "border-[#6D5DFB] bg-[#6D5DFB] text-white" : "border-[#D8D6E5]")}>{task.done ? <Check className="h-3 w-3" strokeWidth={3} /> : null}</span><span className={classNames("min-w-0 flex-1 text-sm font-bold", task.done && "text-[#AAA7B7] line-through")}>{task.title}<span className="mt-1 block text-[11px] font-semibold text-[#ABA8BB]">{task.time} · {task.tag}</span></span>{task.done ? <span className="text-[10px] font-extrabold text-[#35A074]">DONE</span> : <span className="rounded-md bg-[#F4F2FF] px-2 py-1 text-[10px] font-extrabold text-[#7770B4]">NEXT</span>}</button>)}</div></div>
@@ -358,8 +601,149 @@ function VersionedView({ kind, state, updateState }: { kind: "journal" | "tomorr
   const isJournal = kind === "journal";
   const entries = isJournal ? state.journal : state.tomorrow;
   const [text, setText] = useState("");
-  const saveEntry = (event: FormEvent) => { event.preventDefault(); if (!text.trim()) return; const newEntry = { id: uid(), date: dateKey(TODAY), createdAt: `Today · ${new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`, text: text.trim() }; updateState((current) => ({ ...current, [isJournal ? "journal" : "tomorrow"]: [newEntry, ...(isJournal ? current.journal : current.tomorrow)] })); setText(""); };
-  return <><PageHeader eyebrow={isJournal ? "Your inner archive" : "A gift to tomorrow"} title={isJournal ? "Journal, with receipts" : "Tomorrow starts tonight"} description={isJournal ? "Write freely, then keep every version. Nothing gets overwritten — your reflections become a visible trail." : "Before you close the day, leave one clear handoff for the person you will be tomorrow."} action={<div className="flex items-center gap-2 rounded-xl border border-[#E9E8F2] bg-white px-3 py-2 text-[11px] font-bold text-[#8D899F]"><LockKeyhole className="h-4 w-4 text-[#6D5DFB]" /> Append-only history</div>} /><div className="grid gap-5 xl:grid-cols-[0.8fr_1.2fr]"><form onSubmit={saveEntry} className="rounded-2xl border border-[#E9E8F2] bg-white p-5 sm:p-6"><div className="flex items-center gap-3"><SectionIcon icon={isJournal ? BookOpen : CalendarDays} tone={isJournal ? "violet" : "yellow"} /><div><div className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-[#A09DB7]">{isJournal ? "New reflection" : "Plan for tomorrow"}</div><h3 className="mt-1 font-display text-xl font-extrabold tracking-[-0.04em]">{isJournal ? "What is true today?" : "What deserves your first attention?"}</h3></div></div><textarea value={text} onChange={(event) => setText(event.target.value)} placeholder={isJournal ? "Notice the win, the wobble, or the thing you want to remember…" : "Leave a short, kind handoff for tomorrow…"} className="mt-6 min-h-[210px] w-full resize-none rounded-2xl border border-[#E7E5F0] bg-[#FBFAFE] p-4 text-sm leading-6 outline-none placeholder:text-[#B3B0BF] focus:border-[#6D5DFB]" /><div className="mt-4 flex items-center justify-between"><span className="flex items-center gap-1.5 text-[10px] font-bold text-[#AAA7B7]"><Mic2 className="h-3.5 w-3.5" /> Voice notes coming soon</span><Button className="rounded-xl bg-[#6D5DFB] px-4 text-xs font-extrabold hover:bg-[#5949E8]">Save new version <ArrowUpRight className="ml-1.5 h-3.5 w-3.5" /></Button></div></form><div className="rounded-2xl border border-[#E9E8F2] bg-white p-5 sm:p-6"><div className="mb-5 flex items-center justify-between"><div><div className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-[#A09DB7]">Version history</div><h3 className="mt-1 font-display text-xl font-extrabold tracking-[-0.04em]">Every edit stays visible</h3></div><span className="rounded-full bg-[#F1EFFF] px-3 py-1 text-[10px] font-extrabold text-[#6D5DFB]">{entries.length} versions</span></div><div className="relative space-y-0">{entries.map((entry, index) => <div key={entry.id} className="relative flex gap-4 pb-6 last:pb-0"><div className="relative flex w-5 shrink-0 justify-center"><span className={classNames("z-10 mt-1.5 h-3 w-3 rounded-full border-2 border-white", index === 0 ? "bg-[#6D5DFB] shadow-[0_0_0_3px_#E8E5FF]" : "bg-[#BDB9CC]")} />{index < entries.length - 1 ? <span className="absolute top-4 h-full w-px bg-[#E8E6EF]" /> : null}</div><div className="min-w-0 flex-1 rounded-xl border border-[#F0EEF6] bg-[#FCFCFE] p-3.5"><div className="flex flex-wrap items-center gap-2"><span className="text-[11px] font-extrabold text-[#6D5DFB]">{index === 0 ? "Current version" : `Version ${entries.length - index}`}</span><span className="text-[10px] font-bold text-[#AAA7B7]">{entry.createdAt}</span></div><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[#5D5A70]">{entry.text}</p>{index === 0 ? <div className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-[#E8F8F0] px-2 py-1 text-[9px] font-extrabold uppercase tracking-[0.12em] text-[#2F9B72]"><ShieldCheck className="h-3 w-3" /> Saved locally</div> : null}</div></div>)}</div></div></div></>;
+  const [voiceModalOpen, setVoiceModalOpen] = useState(false);
+
+  const saveEntry = (event: FormEvent) => { 
+    event.preventDefault(); 
+    if (!text.trim()) return; 
+    const newEntry = { 
+      id: uid(), 
+      date: dateKey(TODAY), 
+      createdAt: `Today · ${new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`, 
+      text: text.trim() 
+    }; 
+    updateState((current) => ({ 
+      ...current, 
+      [isJournal ? "journal" : "tomorrow"]: [newEntry, ...(isJournal ? current.journal : current.tomorrow)] 
+    })); 
+    setText(""); 
+  };
+
+  return (
+    <>
+      <PageHeader 
+        eyebrow={isJournal ? "Your inner archive" : "A gift to tomorrow"} 
+        title={isJournal ? "Journal, with receipts" : "Tomorrow starts tonight"} 
+        description={isJournal ? "Write or speak freely, then keep every version. Your reflections become a visible, voice-enabled trail." : "Before you close the day, leave one clear handoff for the person you will be tomorrow."} 
+        action={
+          <div className="flex items-center gap-2">
+            {isJournal && (
+              <Button
+                type="button"
+                onClick={() => setVoiceModalOpen(true)}
+                className="h-10 rounded-xl bg-[#6D5DFB] px-3.5 text-xs font-extrabold text-white shadow-md hover:bg-[#5949E8]"
+              >
+                <Mic className="mr-1.5 h-4 w-4 text-[#FFD1D1]" /> Voice Dictate
+              </Button>
+            )}
+            <div className="flex items-center gap-2 rounded-xl border border-[#E9E8F2] bg-white px-3 py-2 text-[11px] font-bold text-[#8D899F]">
+              <LockKeyhole className="h-4 w-4 text-[#6D5DFB]" /> Append-only history
+            </div>
+          </div>
+        } 
+      />
+
+      <div className="grid gap-5 xl:grid-cols-[0.8fr_1.2fr]">
+        <form onSubmit={saveEntry} className="rounded-2xl border border-[#E9E8F2] bg-white p-5 sm:p-6">
+          <div className="flex items-center gap-3">
+            <SectionIcon icon={isJournal ? BookOpen : CalendarDays} tone={isJournal ? "violet" : "yellow"} />
+            <div>
+              <div className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-[#A09DB7]">
+                {isJournal ? "New reflection" : "Plan for tomorrow"}
+              </div>
+              <h3 className="mt-1 font-display text-xl font-extrabold tracking-[-0.04em]">
+                {isJournal ? "What is true today?" : "What deserves your first attention?"}
+              </h3>
+            </div>
+          </div>
+
+          <textarea 
+            value={text} 
+            onChange={(event) => setText(event.target.value)} 
+            placeholder={isJournal ? "Type your thoughts, or tap Voice Dictate to speak naturally without typing…" : "Leave a short, kind handoff for tomorrow…"} 
+            className="mt-6 min-h-[210px] w-full resize-none rounded-2xl border border-[#E7E5F0] bg-[#FBFAFE] p-4 text-sm leading-6 outline-none placeholder:text-[#B3B0BF] focus:border-[#6D5DFB] focus:bg-white" 
+          />
+
+          <div className="mt-4 flex items-center justify-between">
+            {isJournal ? (
+              <button
+                type="button"
+                onClick={() => setVoiceModalOpen(true)}
+                className="flex items-center gap-1.5 rounded-xl border border-[#E9E8F2] bg-[#FAF9FD] px-3 py-2 text-xs font-extrabold text-[#6D5DFB] hover:bg-[#F1EFFF] transition"
+              >
+                <Mic className="h-4 w-4 text-[#E74C3C]" />
+                <span>Voice Assistant</span>
+              </button>
+            ) : (
+              <span className="flex items-center gap-1.5 text-[10px] font-bold text-[#AAA7B7]">
+                <Clock3 className="h-3.5 w-3.5" /> Plan before sleep
+              </span>
+            )}
+
+            <Button type="submit" className="rounded-xl bg-[#6D5DFB] px-4 text-xs font-extrabold hover:bg-[#5949E8]">
+              Save new version <ArrowUpRight className="ml-1.5 h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </form>
+
+        <div className="rounded-2xl border border-[#E9E8F2] bg-white p-5 sm:p-6">
+          <div className="mb-5 flex items-center justify-between">
+            <div>
+              <div className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-[#A09DB7]">Version history</div>
+              <h3 className="mt-1 font-display text-xl font-extrabold tracking-[-0.04em]">Every edit stays visible</h3>
+            </div>
+            <span className="rounded-full bg-[#F1EFFF] px-3 py-1 text-[10px] font-extrabold text-[#6D5DFB]">
+              {entries.length} versions
+            </span>
+          </div>
+
+          <div className="relative space-y-0">
+            {entries.length === 0 ? (
+              <div className="py-12 text-center text-xs text-[#AAA7BD]">
+                No {isJournal ? "journal entries" : "tomorrow notes"} saved yet. Type or record your first entry.
+              </div>
+            ) : (
+              entries.map((entry, index) => (
+                <div key={entry.id} className="relative flex gap-4 pb-6 last:pb-0">
+                  <div className="relative flex w-5 shrink-0 justify-center">
+                    <span 
+                      className={classNames(
+                        "z-10 mt-1.5 h-3 w-3 rounded-full border-2 border-white", 
+                        index === 0 ? "bg-[#6D5DFB] shadow-[0_0_0_3px_#E8E5FF]" : "bg-[#BDB9CC]"
+                      )} 
+                    />
+                    {index < entries.length - 1 ? <span className="absolute top-4 h-full w-px bg-[#E8E6EF]" /> : null}
+                  </div>
+                  <div className="min-w-0 flex-1 rounded-xl border border-[#F0EEF6] bg-[#FCFCFE] p-3.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[11px] font-extrabold text-[#6D5DFB]">
+                        {index === 0 ? "Current version" : `Version ${entries.length - index}`}
+                      </span>
+                      <span className="text-[10px] font-bold text-[#AAA7B7]">{entry.createdAt}</span>
+                    </div>
+                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[#5D5A70]">{entry.text}</p>
+                    {index === 0 ? (
+                      <div className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-[#E8F8F0] px-2 py-1 text-[9px] font-extrabold uppercase tracking-[0.12em] text-[#2F9B72]">
+                        <ShieldCheck className="h-3 w-3" /> Saved locally & synced
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
+      <VoiceJournalAssistant
+        isOpen={voiceModalOpen}
+        onClose={() => setVoiceModalOpen(false)}
+        onTranscriptCaptured={(transcript) => {
+          setText((prev) => (prev ? `${prev}\n\n${transcript}` : transcript));
+        }}
+      />
+    </>
+  );
 }
 
 function MoodView({ state, updateState }: { state: AppState; updateState: (updater: (state: AppState) => AppState) => void }) {
@@ -419,20 +803,106 @@ function ActivityPage({ state, setActiveTab }: { state: AppState; setActiveTab: 
   return <><PageHeader eyebrow="Your consistency map" title="Activity" description="The days you touched your life on purpose. A contribution graph for the work nobody else can see." action={<button onClick={() => setActiveTab("today")} className="flex h-11 items-center gap-2 rounded-xl border border-[#E3E1ED] bg-white px-4 text-xs font-extrabold text-[#6D5DFB]"><CalendarDays className="h-4 w-4" /> Back to today</button>} /><div className="rounded-2xl border border-[#E9E8F2] bg-white p-5 sm:p-6"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start"><div><div className="flex items-center gap-2 text-[11px] font-extrabold uppercase tracking-[0.16em] text-[#A09DB7]"><Activity className="h-4 w-4 text-[#6D5DFB]" /> All-time activity</div><h3 className="mt-2 font-display text-2xl font-extrabold tracking-[-0.05em]">12 day streak <span className="ml-2 text-sm font-bold text-[#AAA7B7]">and growing</span></h3></div><div className="flex gap-4 text-right"><div><div className="text-xl font-extrabold">86</div><div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#AAA7B7]">active days</div></div><div><div className="text-xl font-extrabold text-[#6D5DFB]">68%</div><div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#AAA7B7]">consistency</div></div></div></div><div className="mt-8"><ActivityHeatmap state={state} /><div className="mt-3 flex items-center justify-between text-[10px] font-bold text-[#AAA7B7]"><span>Less</span><div className="flex items-center gap-1"><i className="h-3 w-3 rounded-[3px] bg-[#F0EFF5]" /><i className="h-3 w-3 rounded-[3px] bg-[#D8D1FF]" /><i className="h-3 w-3 rounded-[3px] bg-[#B1A7FF]" /><i className="h-3 w-3 rounded-[3px] bg-[#897BFA]" /><i className="h-3 w-3 rounded-[3px] bg-[#6D5DFB]" /><span className="ml-1">More</span></div></div></div></div><div className="mt-5 grid gap-5 md:grid-cols-2"><div className="rounded-2xl border border-[#E9E8F2] bg-white p-6"><SectionIcon icon={Activity} tone="violet" /><h3 className="mt-5 font-display text-xl font-extrabold">What counts as activity?</h3><p className="mt-2 text-sm leading-6 text-[#858298]">Any meaningful touch counts: a habit, a task, a mood check-in, a journal version, or a challenge day. The point is returning.</p></div><div className="rounded-2xl border border-[#E9E8F2] bg-white p-6"><SectionIcon icon={Trophy} tone="yellow" /><h3 className="mt-5 font-display text-xl font-extrabold">Your most active day</h3><p className="mt-2 text-sm leading-6 text-[#858298]">Tuesday, when you logged 8 small actions. Notice what made that day feel possible and borrow from it.</p><button onClick={() => setActiveTab("review")} className="mt-5 text-xs font-extrabold text-[#6D5DFB]">Ask the review why <ArrowUpRight className="ml-1 inline h-3.5 w-3.5" /></button></div></div></>;
 }
 
-function MoneyPage({ setActiveTab }: { setActiveTab: (tab: TabKey) => void }) { return <LifeOverview state={createInitialState()} setActiveTab={setActiveTab} />; }
-function HealthPage({ setActiveTab }: { setActiveTab: (tab: TabKey) => void }) { return <LifeOverview state={createInitialState()} setActiveTab={setActiveTab} />; }
-function GoalsPage({ setActiveTab }: { setActiveTab: (tab: TabKey) => void }) { return <LifeOverview state={createInitialState()} setActiveTab={setActiveTab} />; }
+function MoneyPage({ state, setActiveTab }: { state: AppState; setActiveTab: (tab: TabKey) => void }) { return <LifeOverview state={state} setActiveTab={setActiveTab} />; }
+function HealthPage({ state, setActiveTab }: { state: AppState; setActiveTab: (tab: TabKey) => void }) { return <LifeOverview state={state} setActiveTab={setActiveTab} />; }
+function GoalsPage({ state, setActiveTab }: { state: AppState; setActiveTab: (tab: TabKey) => void }) { return <LifeOverview state={state} setActiveTab={setActiveTab} />; }
 
 export default function Index() {
-  const [state, setState] = useState<AppState>(loadState);
+  const { user } = useAuth();
+  const [state, setState] = useState<AppState>(createInitialState);
   const [activeTab, setActiveTab] = useState<TabKey>("today");
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }, [state]);
-  const updateState = (updater: (state: AppState) => AppState) => setState((current) => updater(current));
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [resetModalOpen, setResetModalOpen] = useState(false);
+  const [notificationsModalOpen, setNotificationsModalOpen] = useState(false);
+
+  // Real-time synchronization with Firestore
+  useEffect(() => {
+    if (!user) {
+      setIsLoading(false);
+      return;
+    }
+
+    const docRef = doc(db, "users", user.uid, "data", "tracker");
+    let isInitial = true;
+
+    const unsubscribe = onSnapshot(
+      docRef,
+      (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data() as AppState;
+          setState(data);
+        } else if (isInitial) {
+          // Fresh start for user Aman
+          const freshState = createInitialState();
+          setState(freshState);
+          setDoc(docRef, freshState).catch((err) => {
+            console.warn("Notice: Sync pending connection:", err?.message || err);
+          });
+        }
+        setIsLoading(false);
+        isInitial = false;
+      },
+      (err) => {
+        console.warn("Firestore snapshot notice:", err?.message || err);
+        // Fallback gracefully without blocking user
+        setIsLoading(false);
+      }
+    );
+
+    return () => {
+      unsubscribe();
+    };
+  }, [user]);
+
+  // Update state locally and sync to Firestore
+  const updateState = useCallback((updater: (state: AppState) => AppState) => {
+    setState((current) => {
+      const nextState = updater(current);
+      if (user) {
+        setIsSyncing(true);
+        const docRef = doc(db, "users", user.uid, "data", "tracker");
+        setDoc(docRef, nextState)
+          .catch((err) => console.warn("Notice: Firestore background sync pending:", err?.message || err))
+          .finally(() => setIsSyncing(false));
+      }
+      return nextState;
+    });
+  }, [user]);
+
+  // Reset Progress Data handler
+  const handleResetData = async () => {
+    const cleanState = createInitialState();
+    setState(cleanState);
+    setResetModalOpen(false);
+    if (user) {
+      setIsSyncing(true);
+      try {
+        const docRef = doc(db, "users", user.uid, "data", "tracker");
+        await setDoc(docRef, cleanState);
+        // Also clear any old localStorage artifacts if present
+        try {
+          localStorage.removeItem(STORAGE_KEY);
+        } catch {
+          // ignore
+        }
+      } catch (err) {
+        console.warn("Notice: Firestore reset pending connection:", err?.message || err);
+      } finally {
+        setIsSyncing(false);
+      }
+    }
+  };
+
   const content = useMemo(() => {
     switch (activeTab) {
       case "today": return <TodayView state={state} updateState={updateState} setActiveTab={setActiveTab} />;
       case "habits": return <HabitsView state={state} updateState={updateState} />;
       case "tasks": return <TasksView state={state} updateState={updateState} />;
+      case "food": return <FoodTrackerView state={state} updateState={updateState} setActiveTab={setActiveTab} />;
+      case "screentime": return <PhoneUsageView state={state} updateState={updateState} setActiveTab={setActiveTab} />;
+      case "vision": return <VisionMissionView state={state} updateState={updateState} setActiveTab={setActiveTab} />;
+      case "targets": return <TargetManagementView state={state} updateState={updateState} setActiveTab={setActiveTab} />;
       case "journal": return <VersionedView kind="journal" state={state} updateState={updateState} />;
       case "tomorrow": return <VersionedView kind="tomorrow" state={state} updateState={updateState} />;
       case "mood": return <MoodView state={state} updateState={updateState} />;
@@ -440,11 +910,74 @@ export default function Index() {
       case "activity": return <ActivityPage state={state} setActiveTab={setActiveTab} />;
       case "achievements": return <AchievementsView state={state} setActiveTab={setActiveTab} />;
       case "review": return <ReviewView state={state} setActiveTab={setActiveTab} />;
-      case "money": return <MoneyPage setActiveTab={setActiveTab} />;
-      case "health": return <HealthPage setActiveTab={setActiveTab} />;
-      case "goals": return <GoalsPage setActiveTab={setActiveTab} />;
+      case "money": return <MoneyPage state={state} setActiveTab={setActiveTab} />;
+      case "health": return <HealthPage state={state} setActiveTab={setActiveTab} />;
+      case "goals": return <GoalsPage state={state} setActiveTab={setActiveTab} />;
       default: return <TodayView state={state} updateState={updateState} setActiveTab={setActiveTab} />;
     }
-  }, [activeTab, state]);
-  return <AppShell activeTab={activeTab} setActiveTab={setActiveTab} state={state}>{content}</AppShell>;
+  }, [activeTab, state, updateState]);
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center bg-[#F8F8FC]">
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-[0_8px_24px_rgba(109,93,251,0.12)]">
+          <RefreshCw className="h-6 w-6 animate-spin text-[#6D5DFB]" />
+        </div>
+        <div className="mt-4 font-display text-lg font-extrabold text-[#26243A]">Loading DayWise...</div>
+        <div className="mt-1 text-xs text-[#8E8B9E]">Setting up clean slate for Aman</div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <AppShell 
+        activeTab={activeTab} 
+        setActiveTab={setActiveTab} 
+        state={state}
+        onResetData={() => setResetModalOpen(true)}
+        onOpenNotifications={() => setNotificationsModalOpen(true)}
+        isSyncing={isSyncing}
+      >
+        {content}
+      </AppShell>
+
+      {/* Task Notifications & Motivational Reminders Modal */}
+      <NotificationsRemindersModal
+        isOpen={notificationsModalOpen}
+        onClose={() => setNotificationsModalOpen(false)}
+        state={state}
+        updateState={updateState}
+      />
+
+      {/* Confirmation modal for Reset Progress Data */}
+      {resetModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="w-full max-w-md rounded-3xl border border-[#E9E8F2] bg-white p-6 shadow-2xl">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#FFF0EC] text-[#E96E58]">
+              <RotateCcw className="h-6 w-6" />
+            </div>
+            <h3 className="mt-4 font-display text-xl font-extrabold text-[#26243A]">Reset All Progress Data?</h3>
+            <p className="mt-2 text-sm leading-6 text-[#77748F]">
+              This will clear all previously stored tasks, habits, reflections, journal entries, and tracked data from the system, giving your account (Aman) a completely fresh, clean slate.
+            </p>
+            <div className="mt-6 flex items-center justify-end gap-3">
+              <button
+                onClick={() => setResetModalOpen(false)}
+                className="rounded-xl border border-[#E9E8F2] bg-white px-4 py-2.5 text-xs font-extrabold text-[#77748F] hover:bg-[#F8F8FC]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleResetData}
+                className="rounded-xl bg-[#E96E58] px-4 py-2.5 text-xs font-extrabold text-white shadow-[0_8px_16px_rgba(233,110,88,0.2)] hover:bg-[#D45944]"
+              >
+                Yes, Reset Everything
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
 }

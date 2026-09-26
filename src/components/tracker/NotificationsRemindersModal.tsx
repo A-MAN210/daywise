@@ -11,9 +11,11 @@ import {
   ShieldCheck,
   AlertTriangle,
   Lightbulb,
+  CalendarDays,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { AppState, ScheduledReminder } from "@/types/tracker";
+import type { AppState, ScheduledReminder, CalendarEvent } from "@/types/tracker";
+import { playChime } from "@/utils/notificationAudio";
 
 interface NotificationsRemindersModalProps {
   isOpen: boolean;
@@ -248,6 +250,81 @@ export function NotificationsRemindersModal({
             "{MOTIVATIONAL_PROMPTS[0]}"
           </p>
         </div>
+
+        {/* Calendar Events Reminders Section */}
+        {((state.events || []).length > 0) && (
+          <div className="mt-6 rounded-2xl border border-[#FFD9B5] bg-[#FFFBF5] p-4">
+            <div className="flex items-center justify-between border-b border-[#FFE4C4] pb-2.5">
+              <div className="flex items-center gap-2">
+                <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-[#FFE4C4] text-[#D97706]">
+                  <CalendarDays className="h-3.5 w-3.5" />
+                </span>
+                <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#9B5D20]">
+                  Calendar Event Reminders
+                </h3>
+              </div>
+              <span className="text-[10px] font-bold text-[#8C4A10]">
+                {(state.events || []).filter((e) => e.reminderEnabled).length} active alerts
+              </span>
+            </div>
+
+            <div className="mt-3 space-y-2">
+              {(state.events || []).map((ev) => (
+                <div
+                  key={ev.id}
+                  className="flex items-center justify-between rounded-xl bg-white p-3 border border-[#FFE4C4]/60"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <button
+                      onClick={() => {
+                        updateState((prev) => ({
+                          ...prev,
+                          events: (prev.events || []).map((item) =>
+                            item.id === ev.id ? { ...item, reminderEnabled: !item.reminderEnabled } : item
+                          ),
+                        }));
+                      }}
+                      className={`h-4 w-4 rounded border flex items-center justify-center text-xs ${
+                        ev.reminderEnabled
+                          ? "bg-[#D97706] border-[#D97706] text-white"
+                          : "border-[#D0CEDB] bg-white"
+                      }`}
+                      title="Toggle Reminder"
+                    >
+                      {ev.reminderEnabled && <Check className="h-3 w-3 stroke-[3]" />}
+                    </button>
+                    <div className="min-w-0">
+                      <div className="text-xs font-extrabold text-[#26243A] truncate">{ev.title}</div>
+                      <div className="text-[10px] text-[#8E8B9E]">
+                        {ev.date} · {ev.allDay ? "All day" : ev.time || "No time"} ·{" "}
+                        {ev.reminderTiming === "morning_of"
+                          ? "Morning (9 AM)"
+                          : ev.reminderTiming === "at_time"
+                          ? "At start time"
+                          : ev.reminderTiming}
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      playChime();
+                      if ("Notification" in window && Notification.permission === "granted") {
+                        new Notification(`DayWise Reminder: ${ev.title}`, {
+                          body: `Scheduled on ${ev.date} (${ev.time || "All day"}). Don't forget your tasks!`,
+                          icon: "/favicon.ico",
+                        });
+                      }
+                    }}
+                    className="shrink-0 rounded-lg bg-[#FFF7ED] px-2.5 py-1 text-[10px] font-extrabold text-[#D97706] hover:bg-[#FFE4C4]"
+                  >
+                    Test Alert
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Scheduled Reminders List */}
         <div className="mt-6">

@@ -63,6 +63,7 @@ import type {
   VisionMissionState,
   TargetItem,
   ScheduledReminder,
+  CalendarEvent,
 } from "@/types/tracker";
 import { FoodTrackerView } from "@/components/tracker/FoodTrackerView";
 import { PhoneUsageView } from "@/components/tracker/PhoneUsageView";
@@ -70,12 +71,15 @@ import { VisionMissionView } from "@/components/tracker/VisionMissionView";
 import { TargetManagementView } from "@/components/tracker/TargetManagementView";
 import { NotificationsRemindersModal } from "@/components/tracker/NotificationsRemindersModal";
 import { VoiceJournalAssistant } from "@/components/tracker/VoiceJournalAssistant";
+import { CalendarView } from "@/components/tracker/CalendarView";
+import { playChime } from "@/utils/notificationAudio";
 
 const TODAY = new Date();
 const STORAGE_KEY = "daywise-app-state";
 
 type TabKey =
   | "today"
+  | "calendar"
   | "habits"
   | "tasks"
   | "food"
@@ -105,6 +109,7 @@ const navGroups: Array<{ label: string; items: NavItem[] }> = [
     label: "Daily",
     items: [
       { key: "today", label: "Today", icon: Home },
+      { key: "calendar", label: "Calendar", icon: CalendarDays },
       { key: "habits", label: "Habits", icon: CheckCircle2 },
       { key: "tasks", label: "Tasks", icon: ListChecks },
       { key: "food", label: "Food Intake", icon: UtensilsCrossed },
@@ -181,6 +186,49 @@ function createInitialState(): AppState {
     waterLogs: [],
     targets: [],
     reminders: [],
+    events: [
+      {
+        id: "ev-focus",
+        title: "Deep Focus & Deliverables Session",
+        date: today,
+        time: "10:00",
+        endTime: "11:30",
+        allDay: false,
+        category: "Focus",
+        priority: "important",
+        location: "Deep Work Zone",
+        description: "Execute primary priority tasks and review milestones without distractions.",
+        checklist: [
+          { id: "c1", title: "Review morning targets", completed: true },
+          { id: "c2", title: "Complete top priority work block", completed: false },
+          { id: "c3", title: "Sync notes and next actions", completed: false },
+        ],
+        reminderEnabled: true,
+        reminderTiming: "morning_of",
+        isCompleted: false,
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: "ev-wellness",
+        title: "Evening Reset & Tomorrow Planning",
+        date: today,
+        time: "20:00",
+        endTime: "20:30",
+        allDay: false,
+        category: "Reminder",
+        priority: "normal",
+        location: "Home",
+        description: "Wind down, log reflections, and assign tomorrow's key tasks before resting.",
+        checklist: [
+          { id: "c4", title: "Check off completed daily tasks", completed: false },
+          { id: "c5", title: "Set 3 targets for tomorrow", completed: false },
+        ],
+        reminderEnabled: true,
+        reminderTiming: "15_min_before",
+        isCompleted: false,
+        createdAt: new Date().toISOString(),
+      },
+    ],
     finance: [],
     health: [
       { id: "h1", label: "Sleep", value: "—", unit: "hrs", date: today },
@@ -266,7 +314,9 @@ function AppShell({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const openTasks = state.tasks.filter((task) => !task.done).length;
-  const todayMinutes = state.screenLogs.filter((log) => log.date === dateKey(TODAY)).reduce((sum, log) => sum + log.minutes, 0);
+  const todayKeyStr = dateKey(TODAY);
+  const todayCalendarEvents = (state.events || []).filter((e) => e.date === todayKeyStr);
+  const todayMinutes = state.screenLogs.filter((log) => log.date === todayKeyStr).reduce((sum, log) => sum + log.minutes, 0);
 
   const displayName = "Aman";
   const userInitials = "AK";
@@ -373,7 +423,46 @@ function AppShell({
                 {group.items.map((item) => {
                   const Icon = item.icon;
                   const isActive = activeTab === item.key;
-                  return <button key={item.key} onClick={() => setActiveTab(item.key)} className={classNames("group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] font-bold transition", isActive ? "bg-[#6D5DFB] text-white shadow-[0_8px_18px_rgba(109,93,251,0.18)]" : "text-[#77748F] hover:bg-[#F6F4FF] hover:text-[#45415D]")}><Icon className={classNames("h-[17px] w-[17px]", isActive ? "text-white" : "text-[#AAA7BD] group-hover:text-[#6D5DFB]")} />{item.label}{item.key === "tasks" && openTasks > 0 ? <span className={classNames("ml-auto rounded-full px-2 py-0.5 text-[10px]", isActive ? "bg-white/20 text-white" : "bg-[#F0EEFF] text-[#6D5DFB]")}>{openTasks}</span> : null}</button>;
+                  return (
+                    <button
+                      key={item.key}
+                      onClick={() => setActiveTab(item.key)}
+                      className={classNames(
+                        "group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] font-bold transition",
+                        isActive
+                          ? "bg-[#6D5DFB] text-white shadow-[0_8px_18px_rgba(109,93,251,0.18)]"
+                          : "text-[#77748F] hover:bg-[#F6F4FF] hover:text-[#45415D]"
+                      )}
+                    >
+                      <Icon
+                        className={classNames(
+                          "h-[17px] w-[17px]",
+                          isActive ? "text-white" : "text-[#AAA7BD] group-hover:text-[#6D5DFB]"
+                        )}
+                      />
+                      {item.label}
+                      {item.key === "tasks" && openTasks > 0 ? (
+                        <span
+                          className={classNames(
+                            "ml-auto rounded-full px-2 py-0.5 text-[10px]",
+                            isActive ? "bg-white/20 text-white" : "bg-[#F0EEFF] text-[#6D5DFB]"
+                          )}
+                        >
+                          {openTasks}
+                        </span>
+                      ) : null}
+                      {item.key === "calendar" && todayCalendarEvents.length > 0 ? (
+                        <span
+                          className={classNames(
+                            "ml-auto rounded-full px-2 py-0.5 text-[10px] font-extrabold",
+                            isActive ? "bg-white/20 text-white" : "bg-[#FFE4C4] text-[#D97706]"
+                          )}
+                        >
+                          {todayCalendarEvents.length}
+                        </span>
+                      ) : null}
+                    </button>
+                  );
                 })}
               </div>
             </div>
@@ -460,7 +549,28 @@ function AppShell({
       </div>
 
       <nav className="fixed bottom-0 left-0 right-0 z-30 flex justify-around border-t border-[#E9E8F2] bg-white/95 px-2 py-2 backdrop-blur lg:hidden">
-        {[{ key: "today", label: "Today", icon: Home }, { key: "tasks", label: "Tasks", icon: ListChecks }, { key: "journal", label: "Journal", icon: BookOpen }, { key: "activity", label: "Activity", icon: Activity }, { key: "review", label: "Review", icon: Sparkles }].map((item) => { const Icon = item.icon; return <button key={item.key} onClick={() => setActiveTab(item.key as TabKey)} className={classNames("flex min-w-[54px] flex-col items-center gap-1 rounded-xl px-2 py-1 text-[10px] font-bold", activeTab === item.key ? "text-[#6D5DFB]" : "text-[#AAA7BD]")}><Icon className={classNames("h-[18px] w-[18px]", activeTab === item.key ? "text-[#6D5DFB]" : "text-[#AAA7BD]")} />{item.label}</button>; })}
+        {[
+          { key: "today", label: "Today", icon: Home },
+          { key: "calendar", label: "Calendar", icon: CalendarDays },
+          { key: "tasks", label: "Tasks", icon: ListChecks },
+          { key: "journal", label: "Journal", icon: BookOpen },
+          { key: "review", label: "Review", icon: Sparkles },
+        ].map((item) => {
+          const Icon = item.icon;
+          return (
+            <button
+              key={item.key}
+              onClick={() => setActiveTab(item.key as TabKey)}
+              className={classNames(
+                "flex min-w-[54px] flex-col items-center gap-1 rounded-xl px-2 py-1 text-[10px] font-bold",
+                activeTab === item.key ? "text-[#6D5DFB]" : "text-[#AAA7BD]"
+              )}
+            >
+              <Icon className={classNames("h-[18px] w-[18px]", activeTab === item.key ? "text-[#6D5DFB]" : "text-[#AAA7BD]")} />
+              {item.label}
+            </button>
+          );
+        })}
       </nav>
     </div>
   );
@@ -488,20 +598,117 @@ function TodayView({ state, updateState, setActiveTab }: { state: AppState; upda
   const todayWater = (state.waterLogs || []).find((w) => w.date === today)?.glasses || 0;
   const dailyTargets = (state.targets || []).filter((t) => t.scope === "daily" && (t.assignedDate === today || !t.assignedDate));
   const completedDailyTargets = dailyTargets.filter((t) => t.completed).length;
+  const todayEvents = (state.events || []).filter((e) => e.date === today);
 
   const toggleTask = (id: string) => updateState((current) => ({ ...current, tasks: current.tasks.map((task) => task.id === id ? { ...task, done: !task.done } : task) }));
   const toggleHabit = (id: string) => updateState((current) => ({ ...current, habits: current.habits.map((habit) => habit.id === id ? { ...habit, done: habit.done.includes(today) ? habit.done.filter((day) => day !== today) : [...habit.done, today] } : habit) }));
 
   return <>
-    <PageHeader eyebrow={prettyDate(TODAY)} title="Good morning, Aman" description="A clear view of what matters today. Keep the bar small, keep the promise." action={<Button onClick={() => setActiveTab("journal")} className="h-11 rounded-xl bg-[#6D5DFB] px-4 text-xs font-extrabold shadow-[0_8px_18px_rgba(109,93,251,0.2)] hover:bg-[#5949E8]"><Plus className="mr-2 h-4 w-4" />Log an entry</Button>} />
+    <PageHeader eyebrow={prettyDate(TODAY)} title="Good morning, Aman" description="A clear view of what matters today. Keep the bar small, keep the promise." action={<Button onClick={() => setActiveTab("calendar")} className="h-11 rounded-xl bg-[#6D5DFB] px-4 text-xs font-extrabold shadow-[0_8px_18px_rgba(109,93,251,0.2)] hover:bg-[#5949E8]"><Plus className="mr-2 h-4 w-4" />Schedule Event</Button>} />
     {screenMinutes > state.usualScreenMinutes ? <div className="mb-6 flex items-center gap-3 rounded-2xl border border-[#FFD9B5] bg-[#FFF7ED] px-4 py-3 text-sm text-[#9B5D20]"><span className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#FFE9CE]"><Smartphone className="h-4 w-4" /></span><span><b>Gentle nudge:</b> you've been on your phone for {screenMinutes} minutes today — above your usual {state.usualScreenMinutes}. Maybe leave social apps for tomorrow?</span><button onClick={() => setActiveTab("screentime")} className="ml-auto hidden shrink-0 text-xs font-extrabold text-[#D27B21] sm:block">See details</button></div> : null}
 
-    <section className="mb-6 overflow-hidden rounded-[26px] border border-[#E9E4FF] bg-[#F1EFFF] p-5 sm:p-7"><div className="flex flex-col gap-7 lg:flex-row lg:items-center lg:justify-between"><div className="max-w-[560px]"><div className="mb-3 inline-flex items-center gap-2 rounded-full bg-white/75 px-3 py-1 text-[10px] font-extrabold uppercase tracking-[0.14em] text-[#6D5DFB]"><Sparkles className="h-3.5 w-3.5" /> Your rhythm is building</div><h2 className="font-display text-[27px] font-extrabold leading-tight tracking-[-0.04em] text-[#302C5A] sm:text-[34px]">Small steps are adding up.<br /><span className="text-[#6D5DFB]">Keep your next one easy.</span></h2><p className="mt-3 max-w-[480px] text-sm leading-6 text-[#77729B]">You've shown up {completedHabits + completedTasks} times today. The goal isn't a perfect day — it's a day you can trust.</p><div className="mt-5 flex flex-wrap gap-3"><button onClick={() => setActiveTab("habits")} className="rounded-xl bg-[#6D5DFB] px-4 py-2.5 text-xs font-extrabold text-white shadow-[0_8px_16px_rgba(109,93,251,0.2)]">Continue routine</button><button onClick={() => setActiveTab("targets")} className="rounded-xl bg-white px-4 py-2.5 text-xs font-extrabold text-[#6D5DFB]">View targets <ArrowUpRight className="ml-1 inline h-3.5 w-3.5" /></button></div></div><div className="flex items-center gap-8 rounded-2xl bg-white/65 p-5 sm:p-6"><ProgressRing value={Math.min(completion, 100)} size={106} stroke={9} /><div><div className="text-xs font-extrabold uppercase tracking-[0.15em] text-[#A19BBE]">Today score</div><div className="mt-2 text-2xl font-extrabold tracking-[-0.05em] text-[#302C5A]">{completedTasks}/{state.tasks.length} tasks</div><div className="mt-1 text-xs font-semibold text-[#9992B2]">{completedHabits}/{state.habits.length} habits done</div><div className="mt-4 flex gap-1.5">{["M", "T", "W", "T", "F", "S", "S"].map((day, index) => <span key={`${day}-${index}`} className={classNames("flex h-6 w-6 items-center justify-center rounded-lg text-[9px] font-extrabold", index < 5 ? "bg-[#6D5DFB] text-white" : "bg-white text-[#A29EBA]")}>{day}</span>)}</div></div></div></div></section>
+    <section className="mb-6 overflow-hidden rounded-[26px] border border-[#E9E4FF] bg-[#F1EFFF] p-5 sm:p-7"><div className="flex flex-col gap-7 lg:flex-row lg:items-center lg:justify-between"><div className="max-w-[560px]"><div className="mb-3 inline-flex items-center gap-2 rounded-full bg-white/75 px-3 py-1 text-[10px] font-extrabold uppercase tracking-[0.14em] text-[#6D5DFB]"><Sparkles className="h-3.5 w-3.5" /> Your rhythm is building</div><h2 className="font-display text-[27px] font-extrabold leading-tight tracking-[-0.04em] text-[#302C5A] sm:text-[34px]">Small steps are adding up.<br /><span className="text-[#6D5DFB]">Keep your next one easy.</span></h2><p className="mt-3 max-w-[480px] text-sm leading-6 text-[#77729B]">You've shown up {completedHabits + completedTasks} times today. The goal isn't a perfect day — it's a day you can trust.</p><div className="mt-5 flex flex-wrap gap-3"><button onClick={() => setActiveTab("habits")} className="rounded-xl bg-[#6D5DFB] px-4 py-2.5 text-xs font-extrabold text-white shadow-[0_8px_16px_rgba(109,93,251,0.2)]">Continue routine</button><button onClick={() => setActiveTab("calendar")} className="rounded-xl bg-white px-4 py-2.5 text-xs font-extrabold text-[#6D5DFB]">View Calendar <ArrowUpRight className="ml-1 inline h-3.5 w-3.5" /></button></div></div><div className="flex items-center gap-8 rounded-2xl bg-white/65 p-5 sm:p-6"><ProgressRing value={Math.min(completion, 100)} size={106} stroke={9} /><div><div className="text-xs font-extrabold uppercase tracking-[0.15em] text-[#A19BBE]">Today score</div><div className="mt-2 text-2xl font-extrabold tracking-[-0.05em] text-[#302C5A]">{completedTasks}/{state.tasks.length} tasks</div><div className="mt-1 text-xs font-semibold text-[#9992B2]">{completedHabits}/{state.habits.length} habits done</div><div className="mt-4 flex gap-1.5">{["M", "T", "W", "T", "F", "S", "S"].map((day, index) => <span key={`${day}-${index}`} className={classNames("flex h-6 w-6 items-center justify-center rounded-lg text-[9px] font-extrabold", index < 5 ? "bg-[#6D5DFB] text-white" : "bg-white text-[#A29EBA]")}>{day}</span>)}</div></div></div></div></section>
 
-    <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><MetricCard label="Open tasks" value={`${openTasks}`} helper="2 due today" icon={ListChecks} tone="bg-[#FFF0EC] text-[#E96E58]" /><MetricCard label="Habit streak" value="6 days" helper="Best this month" icon={Flame} tone="bg-[#FFF5D9] text-[#CA921A]" /><MetricCard label="Daily targets" value={`${completedDailyTargets}/${dailyTargets.length || 3}`} helper="Planned for today" icon={Target} tone="bg-[#F1EFFF] text-[#6D5DFB]" /><MetricCard label="Phone today" value={`${screenMinutes}m`} helper={`${Math.max(state.usualScreenMinutes - screenMinutes, 0)}m under usual`} icon={Smartphone} tone="bg-[#E8F8F0] text-[#2F9B72]" /></div>
+    <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <MetricCard label="Open tasks" value={`${openTasks}`} helper="2 due today" icon={ListChecks} tone="bg-[#FFF0EC] text-[#E96E58]" />
+      <MetricCard label="Today events" value={`${todayEvents.length}`} helper={todayEvents.length > 0 ? "Reminders active" : "None scheduled"} icon={CalendarDays} tone="bg-[#FFF5D9] text-[#CA921A]" />
+      <MetricCard label="Daily targets" value={`${completedDailyTargets}/${dailyTargets.length || 3}`} helper="Planned for today" icon={Target} tone="bg-[#F1EFFF] text-[#6D5DFB]" />
+      <MetricCard label="Phone today" value={`${screenMinutes}m`} helper={`${Math.max(state.usualScreenMinutes - screenMinutes, 0)}m under usual`} icon={Smartphone} tone="bg-[#E8F8F0] text-[#2F9B72]" />
+    </div>
+
+    {/* Today's Scheduled Events Highlight Banner */}
+    {todayEvents.length > 0 && (
+      <div className="mb-6 rounded-2xl border border-[#FFD9B5] bg-[#FFFBF5] p-5 shadow-xs">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#FFE4C4] text-[#D97706]">
+              <CalendarDays className="h-5 w-5" />
+            </span>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-extrabold uppercase tracking-wider text-[#D97706]">
+                  Events & Reminders on This Day
+                </span>
+                <span className="rounded-full bg-[#FFE4C4] px-2 py-0.5 text-[10px] font-extrabold text-[#8C4A10]">
+                  {todayEvents.length} Scheduled
+                </span>
+              </div>
+              <h3 className="mt-0.5 text-sm font-extrabold text-[#26243A]">
+                {todayEvents.map((e) => e.title).join(" · ")}
+              </h3>
+            </div>
+          </div>
+          <button
+            onClick={() => setActiveTab("calendar")}
+            className="flex items-center gap-1 rounded-xl bg-[#D97706] px-3.5 py-2 text-xs font-extrabold text-white hover:bg-[#B45309]"
+          >
+            Open in Calendar <ArrowUpRight className="h-3.5 w-3.5" />
+          </button>
+        </div>
+
+        <div className="mt-3.5 grid gap-2.5 sm:grid-cols-2">
+          {todayEvents.map((ev) => (
+            <div
+              key={ev.id}
+              onClick={() => setActiveTab("calendar")}
+              className="flex items-start justify-between rounded-xl border border-[#FFE4C4]/60 bg-white p-3 hover:border-[#D97706] cursor-pointer transition"
+            >
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-extrabold text-[#26243A]">{ev.title}</span>
+                  {ev.priority === "urgent" && (
+                    <span className="rounded bg-[#FEE2E2] px-1.5 py-0.2 text-[8px] font-black text-[#DC2626]">
+                      URGENT
+                    </span>
+                  )}
+                </div>
+                <div className="mt-1 flex items-center gap-2 text-[11px] text-[#8E8B9E]">
+                  <Clock3 className="h-3 w-3 text-[#6D5DFB]" />
+                  <span>{ev.allDay ? "All Day" : ev.time || "Scheduled"}</span>
+                  {ev.location && <span>· {ev.location}</span>}
+                </div>
+                {ev.checklist && ev.checklist.length > 0 && (
+                  <div className="mt-1 text-[10px] font-bold text-[#6D5DFB]">
+                    ✓ {ev.checklist.filter((c) => c.completed).length}/{ev.checklist.length} sub-tasks complete
+                  </div>
+                )}
+              </div>
+              {ev.reminderEnabled && (
+                <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-[#FFF7ED] text-[#D97706]" title="Reminder Set">
+                  <Bell className="h-3.5 w-3.5" />
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
 
     {/* Integrated New Features Spotlight Bar on Today View */}
-    <div className="mb-6 grid gap-4 sm:grid-cols-3">
+    <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {/* Calendar Quick Card */}
+      <div 
+        onClick={() => setActiveTab("calendar")}
+        className="rounded-2xl border border-[#E9E8F2] bg-white p-5 cursor-pointer hover:border-[#6D5DFB] hover:shadow-xs transition"
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#F1EFFF] text-[#6D5DFB]">
+              <CalendarDays className="h-4 w-4" />
+            </span>
+            <div>
+              <div className="text-xs font-extrabold text-[#26243A]">Interactive Calendar</div>
+              <div className="text-[10px] text-[#8E8B9E]">{todayEvents.length} events today</div>
+            </div>
+          </div>
+          <ArrowUpRight className="h-4 w-4 text-[#A09DB7]" />
+        </div>
+        <div className="mt-3 flex items-center justify-between text-xs font-bold text-[#6D6A82]">
+          <span>Event & tasks schedule</span>
+          <span className="text-[#6D5DFB]">Open →</span>
+        </div>
+      </div>
+
       {/* Food Tracker Quick Card */}
       <div 
         onClick={() => setActiveTab("food")}
@@ -514,14 +721,14 @@ function TodayView({ state, updateState, setActiveTab }: { state: AppState; upda
             </span>
             <div>
               <div className="text-xs font-extrabold text-[#26243A]">Daily Food Intake</div>
-              <div className="text-[10px] text-[#8E8B9E]">{todayFoodLogs.length} meals logged today</div>
+              <div className="text-[10px] text-[#8E8B9E]">{todayFoodLogs.length} meals logged</div>
             </div>
           </div>
           <ArrowUpRight className="h-4 w-4 text-[#A09DB7]" />
         </div>
         <div className="mt-3 flex items-center justify-between text-xs font-bold text-[#6D6A82]">
           <span>Hydration: {todayWater}/8 glasses</span>
-          <span className="text-[#6D5DFB]">Manage meals →</span>
+          <span className="text-[#6D5DFB]">Meals →</span>
         </div>
       </div>
 
@@ -544,7 +751,7 @@ function TodayView({ state, updateState, setActiveTab }: { state: AppState; upda
         </div>
         <div className="mt-3 flex items-center justify-between text-xs font-bold text-[#6D6A82]">
           <span>Budget: {Math.floor(state.usualScreenMinutes / 60)}h {state.usualScreenMinutes % 60}m</span>
-          <span className="text-[#6D5DFB]">App analytics →</span>
+          <span className="text-[#6D5DFB]">Monitor →</span>
         </div>
       </div>
 
@@ -559,15 +766,15 @@ function TodayView({ state, updateState, setActiveTab }: { state: AppState; upda
               <Moon className="h-4 w-4" />
             </span>
             <div>
-              <div className="text-xs font-extrabold text-[#26243A]">Goals & Tomorrow Plan</div>
-              <div className="text-[10px] text-[#8E8B9E]">Target management</div>
+              <div className="text-xs font-extrabold text-[#26243A]">Goals & Targets</div>
+              <div className="text-[10px] text-[#8E8B9E]">Tomorrow planning</div>
             </div>
           </div>
           <ArrowUpRight className="h-4 w-4 text-[#A09DB7]" />
         </div>
         <div className="mt-3 flex items-center justify-between text-xs font-bold text-[#6D6A82]">
-          <span>Pre-sleep handoff</span>
-          <span className="text-[#6D5DFB]">Open targets →</span>
+          <span>Pre-sleep plan</span>
+          <span className="text-[#6D5DFB]">Targets →</span>
         </div>
       </div>
     </div>
@@ -815,6 +1022,31 @@ export default function Index() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [resetModalOpen, setResetModalOpen] = useState(false);
   const [notificationsModalOpen, setNotificationsModalOpen] = useState(false);
+  const [dismissedReminders, setDismissedReminders] = useState<string[]>([]);
+
+  const todayKeyStr = dateKey(TODAY);
+  const activeTodayReminders = useMemo(() => {
+    return (state.events || []).filter(
+      (ev) => ev.date === todayKeyStr && ev.reminderEnabled && !dismissedReminders.includes(ev.id)
+    );
+  }, [state.events, todayKeyStr, dismissedReminders]);
+
+  // Periodic reminder alert / trigger
+  useEffect(() => {
+    if (activeTodayReminders.length > 0) {
+      if ("Notification" in window && Notification.permission === "granted") {
+        const topEv = activeTodayReminders[0];
+        try {
+          new Notification(`DayWise Reminder: ${topEv.title}`, {
+            body: `Scheduled for today (${topEv.allDay ? "All day" : topEv.time || "Scheduled"}). Don't forget your tasks!`,
+            icon: "/favicon.ico",
+          });
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }, [activeTodayReminders]);
 
   // Real-time synchronization with Firestore
   useEffect(() => {
@@ -897,6 +1129,7 @@ export default function Index() {
   const content = useMemo(() => {
     switch (activeTab) {
       case "today": return <TodayView state={state} updateState={updateState} setActiveTab={setActiveTab} />;
+      case "calendar": return <CalendarView state={state} updateState={updateState} setActiveTab={setActiveTab} />;
       case "habits": return <HabitsView state={state} updateState={updateState} />;
       case "tasks": return <TasksView state={state} updateState={updateState} />;
       case "food": return <FoodTrackerView state={state} updateState={updateState} setActiveTab={setActiveTab} />;
@@ -939,6 +1172,54 @@ export default function Index() {
         onOpenNotifications={() => setNotificationsModalOpen(true)}
         isSyncing={isSyncing}
       >
+        {activeTodayReminders.length > 0 && (
+          <div className="mb-6 flex flex-col justify-between gap-3 rounded-2xl border border-[#FFD9B5] bg-[#FFF8ED] p-4 text-[#8C4A10] shadow-xs sm:flex-row sm:items-center">
+            <div className="flex items-center gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#FFE4C4] text-[#D97706]">
+                <Bell className="h-5 w-5 animate-bounce" />
+              </span>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-[#D97706]">
+                    Today's Event Reminder
+                  </span>
+                  <span className="rounded-full bg-[#FFE4C4] px-1.5 py-0.2 text-[9px] font-extrabold text-[#8C4A10]">
+                    Don't forget your tasks
+                  </span>
+                </div>
+                <div className="text-sm font-extrabold text-[#26243A]">
+                  {activeTodayReminders[0].title}
+                  {activeTodayReminders[0].time && (
+                    <span className="ml-1 text-xs font-semibold text-[#8E8B9E]">at {activeTodayReminders[0].time}</span>
+                  )}
+                </div>
+                <div className="text-xs text-[#9B6B37]">
+                  {activeTodayReminders[0].description || "You have an event scheduled for today. Timely reminders are set."}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+              <Button
+                onClick={() => {
+                  setActiveTab("calendar");
+                }}
+                className="h-8 rounded-xl bg-[#D97706] px-3 text-xs font-extrabold text-white hover:bg-[#B45309]"
+              >
+                View on Calendar
+              </Button>
+              <button
+                onClick={() => {
+                  setDismissedReminders((prev) => [...prev, activeTodayReminders[0].id]);
+                }}
+                className="rounded-xl border border-[#FFE4C4] bg-white px-3 py-1.5 text-xs font-bold text-[#8C4A10] hover:bg-[#FFF5EB]"
+              >
+                Acknowledge
+              </button>
+            </div>
+          </div>
+        )}
+
         {content}
       </AppShell>
 

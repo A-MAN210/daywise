@@ -16,7 +16,7 @@
     },
     "UserAppState": {
       "title": "UserAppState",
-      "description": "The complete clean state and tracking data for a user including food, phone usage, vision, and targets",
+      "description": "The complete clean state and tracking data for a user including food, phone usage, vision, targets, and calendar events",
       "type": "object",
       "properties": {
         "userId": { "type": "string" },
@@ -32,6 +32,7 @@
         "visionMission": { "type": "object" },
         "targets": { "type": "array" },
         "reminders": { "type": "array" },
+        "events": { "type": "array" },
         "finance": { "type": "array" },
         "health": { "type": "array" },
         "goals": { "type": "array" },
@@ -40,6 +41,30 @@
         "updatedAt": { "type": "string" }
       },
       "required": ["habits", "tasks", "journal", "tomorrow", "moods", "screenLogs", "finance", "health", "goals", "challenge", "usualScreenMinutes"]
+    },
+    "CalendarEvent": {
+      "title": "CalendarEvent",
+      "description": "An event with date, time, category, priority, notes, checklist, and reminder settings",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "date": { "type": "string" },
+        "time": { "type": "string" },
+        "endTime": { "type": "string" },
+        "allDay": { "type": "boolean" },
+        "category": { "type": "string" },
+        "color": { "type": "string" },
+        "location": { "type": "string" },
+        "description": { "type": "string" },
+        "priority": { "type": "string" },
+        "checklist": { "type": "array" },
+        "reminderEnabled": { "type": "boolean" },
+        "reminderTiming": { "type": "string" },
+        "isCompleted": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "title", "date", "category", "reminderEnabled"]
     }
   },
   "firestore": {

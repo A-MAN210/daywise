@@ -64,11 +64,50 @@ export type TargetItem = {
   createdAt: string;
 };
 
+export type CalendarEventPriority = "normal" | "important" | "urgent";
+
+export type CalendarEventCategory =
+  | "Meeting"
+  | "Personal"
+  | "Work"
+  | "Deadline"
+  | "Health"
+  | "Reminder"
+  | "Task"
+  | "Celebration"
+  | "Focus";
+
+export type EventChecklistItem = {
+  id: string;
+  title: string;
+  completed: boolean;
+};
+
+export type CalendarEvent = {
+  id: string;
+  title: string;
+  date: string; // YYYY-MM-DD
+  time?: string; // e.g. "10:00"
+  endTime?: string;
+  allDay?: boolean;
+  category: CalendarEventCategory;
+  color?: string;
+  location?: string;
+  description?: string;
+  priority: CalendarEventPriority;
+  checklist?: EventChecklistItem[];
+  reminderEnabled: boolean;
+  reminderTiming: "at_time" | "15_min_before" | "1_hour_before" | "morning_of" | "1_day_before";
+  isCompleted?: boolean;
+  dismissedReminderDates?: string[];
+  createdAt: string;
+};
+
 export type ScheduledReminder = {
   id: string;
   title: string;
   time: string; // "08:00"
-  type: "habit" | "task" | "planning" | "health";
+  type: "habit" | "task" | "planning" | "health" | "event";
   enabled: boolean;
   message: string;
 };
@@ -96,6 +135,7 @@ export type AppState = {
   visionMission?: VisionMissionState;
   targets?: TargetItem[];
   reminders?: ScheduledReminder[];
+  events?: CalendarEvent[];
   finance: FinanceEntry[];
   health: HealthLog[];
   goals: GoalItem[];
